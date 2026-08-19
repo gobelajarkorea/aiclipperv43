@@ -1,4 +1,4 @@
-name: Build APK
+name: Build AutoClipper AI
 
 on:
   workflow_dispatch:
@@ -14,31 +14,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Check repository
-        run: |
-          echo "=== ROOT ==="
-          ls -la
-
-      - name: Extract source
-        run: |
-          ZIP=$(find . -maxdepth 1 -type f -name "*.zip" | head -n 1)
-
-          if [ -z "$ZIP" ]; then
-            echo "ERROR: ZIP source tidak ditemukan"
-            exit 1
-          fi
-
-          echo "ZIP ditemukan: $ZIP"
-          rm -rf project
-          mkdir project
-          unzip -q "$ZIP" -d project
-
-      - name: Find Android project
-        run: |
-          echo "=== HASIL EXTRACT ==="
-          find project -maxdepth 3 -type f | head -100
-
-      - name: Setup Java
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -47,35 +23,107 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Locate Gradle project
+      - name: Show repository
         run: |
-          if [ -f "project/gradlew" ]; then
-            echo "GRADLE_DIR=project" >> $GITHUB_ENV
-          else
-            DIR=$(find project -name gradlew -type f | head -n 1 | xargs -r dirname)
+          echo "=== ROOT ==="
+          find . -maxdepth 2 -type f | sort
 
-            if [ -z "$DIR" ]; then
-              echo "ERROR: gradlew tidak ditemukan"
-              exit 1
-            fi
+      - name: Extract source
+        run: |
+          ZIP=$(find . -maxdepth 1 -type f -iname "*.zip" | head -n 1)
 
-            echo "GRADLE_DIR=$DIR" >> $GITHUB_ENV
+          if [ -z "$ZIP" ]; then
+            echo "ERROR: Source ZIP tidak ditemukan"
+            exit 1
           fi
 
-      - name: Build Debug APK
+          echo "Source: $ZIP"
+
+          rm -rf project
+          mkdir -p project
+
+          unzip -q "$ZIP" -d project
+
+          echo "=== EXTRACTED ==="
+          find project -maxdepth 5 -type f | sort | head -300
+
+      - name: Find Android project
         run: |
+          echo "=== MENCARI FILE GRADLE ==="
+
+          find project \
+            \( -name "settings.gradle" \
+            -o -name "settings.gradle.kts" \
+            -o -name "build.gradle" \
+            -o -name "build.gradle.kts" \
+            -o -name "gradlew" \) \
+            -print
+
+      - name: Locate Gradle project
+        shell: bash
+        run: |
+          set -e
+
+          DIR=""
+
+          if find project -name "gradlew" -type f | grep -q .; then
+            DIR=$(find project -name "gradlew" -type f | head -n 1 | xargs dirname)
+          elif find project -name "settings.gradle" -type f | grep -q .; then
+            DIR=$(find project -name "settings.gradle" -type f | head -n 1 | xargs dirname)
+          elif find project -name "settings.gradle.kts" -type f | grep -q .; then
+            DIR=$(find project -name "settings.gradle.kts" -type f | head -n 1 | xargs dirname)
+          fi
+
+          if [ -z "$DIR" ]; then
+            echo ""
+            echo "======================================"
+            echo "ERROR: PROJECT GRADLE TIDAK DITEMUKAN"
+            echo "======================================"
+            echo ""
+            echo "Isi ZIP:"
+            find project -maxdepth 6 -type f | sort
+            exit 1
+          fi
+
+          echo "Gradle project ditemukan:"
+          echo "$DIR"
+
+          echo "GRADLE_DIR=$DIR" >> "$GITHUB_ENV"
+
+      - name: Build APK
+        shell: bash
+        run: |
+          set -e
+
           cd "$GRADLE_DIR"
-          chmod +x gradlew
-          ./gradlew assembleDebug --stacktrace
+
+          echo "=== GRADLE PROJECT ==="
+          pwd
+          ls -la
+
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew assembleDebug --stacktrace
+          else
+            echo "gradlew tidak ada."
+
+            if [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+              gradle assembleDebug --stacktrace
+            else
+              echo "ERROR: File Gradle project tidak lengkap."
+              exit 1
+            fi
+          fi
 
       - name: Find APK
         run: |
-          echo "=== APK ==="
-          find "$GRADLE_DIR" -type f -name "*.apk"
+          echo "=== APK YANG DIHASILKAN ==="
+          find . -type f -name "*.apk" -print
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: AutoClipperAI-debug
+          name: AutoClipperAI-APK
           path: |
             **/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
